@@ -146,9 +146,7 @@ def read_cmoney_data_txt(table_name: str = None) -> pd.DataFrame:
 
 
 #  return date by given start_date to end_date, and frequency, ex: daily, weekly, monthly, quarterly, yearly
-def get_date_range(
-    start_date: str = None, end_date: str = None, freq: str = None
-) -> List[str]:
+def get_date_range(start_date: str = None, end_date: str = None, freq: str = None):
     """回傳日期區間, 預設為1980-01-01至今日, 頻率為日, 可自訂起始日期, 結束日期, 頻率, ex: D, W, M, Q, Y, 回傳格式為YYYYMMDD, 且為頻率的最後一天
 
     Args:
@@ -215,7 +213,7 @@ def custom_split_date_range(date_range, num_splits):
         start_idx = idx
         end_idx = idx + round(avg_subset_size)
         end_idx = min(end_idx, len(date_range))
-        date_subsets.append(date_range[start_idx:end_idx])
+        date_subsets.append(date_range[start_idx : end_idx + 1])
         idx = end_idx
 
     if date_subsets[-1][-1] != date_range[-1]:
@@ -350,6 +348,37 @@ def get_CMoney_data(
             print(f"{table_name}下載完成, 花費時間: {round(end_time - start_time, 0)}秒")
 
 
+def create_variable(name):
+    index = data_folder.index(name)
+
+    feather_data_folder = os.path.join(os.getcwd(), data_folder[index])
+
+    # get the list of feather files in the folder
+    feather_file_list = os.listdir(feather_data_folder)
+
+    table_name = data_folder[index]
+    table_index = table_index_dict[data_folder[index]]
+
+    # print table index and folder name
+    print(table_index, table_name)
+    # create variable by the folder name, in the format of df_{table_index}
+
+    df = pd.DataFrame()
+
+    for feather_file in feather_file_list:
+        if (
+            pd.read_feather(os.path.join(feather_data_folder, feather_file)).columns[0]
+            != "Error_沒有資料！"
+        ):
+            df = pd.concat(
+                [df, pd.read_feather(os.path.join(feather_data_folder, feather_file))],
+                axis=0,
+            )
+
+    # Add the variable to the global scope
+    globals()[f"df_{table_index}_{table_name}"] = df
+
+
 if __name__ == "__main__":
     current_path = os.getcwd().replace("\\", r"/")
     # print(current_path)
@@ -373,6 +402,6 @@ if __name__ == "__main__":
     # get_CMoney_data(table_name="季IFRS財報(損益單季)")
     # get_CMoney_data(table_name="季IFRS財報(現金流量單季)")
     # get_CMoney_data(table_name="上市櫃公司基本資料")
-    get_CMoney_data(table_name="下市櫃公司基本資料")
+    # get_CMoney_data(table_name="下市櫃公司基本資料")
     # get_CMoney_data(table_name="月董監股權與設質統計表")
     print("done")
