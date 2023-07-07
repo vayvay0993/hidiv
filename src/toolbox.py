@@ -3,7 +3,6 @@ import numpy as np
 import os
 from copy import deepcopy
 from typing import Union
-from plyer import notification
 
 
 def print_progress_bar(
