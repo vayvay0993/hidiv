@@ -1,5 +1,18 @@
 import pandas as pd
 from copy import deepcopy
+import datetime
+
+
+def count_quarter(start_date, end_date):
+    start_date = pd.to_datetime(start_date)
+    end_date = pd.to_datetime(end_date)
+
+    # Assuming that quarters are defined by calendar quarters.
+    # Start from 0, because if both dates are in the same quarter, the count should be 0.
+    quarter_count = (
+        (end_date.year - start_date.year) * 4 + end_date.quarter
+    ) - start_date.quarter
+    return quarter_count
 
 
 def quarter_end_date(year_quarter: str):
@@ -99,9 +112,7 @@ def quarterly_to_daily(df_financial_statement, accounting_item, days_shift=1):
 
 
 def calc_periodic(df_financial_statement, column_name, period):
-    df = deepcopy(
-        df_financial_statement[["股票代號", "年季", "建立日期", "股票名稱", f"{column_name}"]]
-    )
+    df = deepcopy(df_financial_statement[["股票代號", "年季", "建立日期", f"{column_name}"]])
 
     df.dropna(inplace=True)
 
@@ -128,7 +139,7 @@ def calc_periodic(df_financial_statement, column_name, period):
         lambda x: x.strftime("%Y") + str(int(x.strftime("%m")) // 3).zfill(2)
     )
 
-    df["建立日期"] = df.groupby("股票代號")["建立日期"].bfill()
+    # df["建立日期"] = df.groupby("股票代號")["建立日期"].bfill()
 
     # create a column to store the year_season_after: if year_season = 202001, then year_season_q_ago = 202002 or 202101
     if period == "qoq":
@@ -153,4 +164,78 @@ def calc_periodic(df_financial_statement, column_name, period):
 
     df = df[["股票代號", "年季", "建立日期", f"{column_name}_{period}"]]
 
+    return df
+
+
+def flow_item_to_quarter_data(df_financial_statement, accounting_item: str, clean=True):
+    df = df_financial_statement[["年季", "股票代號", "建立日期", accounting_item]].copy()
+
+    # drop na
+    df.dropna(inplace=True)
+
+    # drop the duplicate
+    df.drop_duplicates(inplace=True)
+
+    df = df.sort_values(by=["股票代號", "年季"]).reset_index(drop=True)
+
+    df[f"{accounting_item}"] = df[f"{accounting_item}"].astype(float)
+
+    df["季底日期"] = df["年季"].apply(lambda x: quarter_end_date(x))
+
+    df["季底日期_last"] = df.groupby("股票代號", as_index=False, group_keys=False)[
+        "季底日期"
+    ].shift(1)
+    df["季底日期_next"] = df.groupby("股票代號", as_index=False, group_keys=False)[
+        "季底日期"
+    ].shift(-1)
+
+    # calculate the date difference between '年季_last' and '年季_next' with '年季_dt'
+    df["季底日期_next_dt"] = df["季底日期_next"] - df["季底日期"]
+    df["季底日期_dt_last"] = df["季底日期"] - df["季底日期_last"]
+
+    df["季底日期_max"] = df[["季底日期_dt_last", "季底日期_next_dt"]].max(axis=1)
+    df["季底日期_max"] = df["季底日期_max"].apply(lambda x: x.days)
+
+    # if 季底日期_max is smaller than 100, then it is a quarterly data, if greater than 200, then it is a yearly data, if between 100 and 200, then it is a half yearly data
+    df["財報類別"] = df["季底日期_max"].apply(lambda x: 1 if x < 100 else 4 if x > 200 else 2)
+    df.set_index("季底日期", inplace=True)
+
+    df_grouped = df.groupby("股票代號")[accounting_item].resample("Q").mean().reset_index()
+    df.reset_index(inplace=True)
+    df = df_grouped.merge(
+        df[["股票代號", "季底日期", "財報類別", "建立日期"]], how="left", on=["股票代號", "季底日期"]
+    ).copy()
+
+    # turn the '季底日期' to '年季'
+    df["年季"] = df["季底日期"].apply(
+        lambda x: x.strftime("%Y") + str(int(x.strftime("%m")) // 3).zfill(2)
+    )
+
+    # df["建立日期"] = df.groupby("股票代號")["建立日期"].bfill()
+    df.fillna(0, inplace=True)
+
+    df[f"{accounting_item}_4_row_sum"] = df.groupby(
+        "股票代號", as_index=False, group_keys=False
+    ).apply(lambda x: x[accounting_item].rolling(4).sum())
+
+    df[f"number_of_quarter_sum"] = df.groupby(
+        "股票代號", as_index=False, group_keys=False
+    ).apply(lambda x: x["財報類別"].rolling(4).sum())
+
+    df[f"{accounting_item}_4q_sum"] = (
+        df[f"{accounting_item}_4_row_sum"] / df[f"number_of_quarter_sum"] * 4
+    )
+
+    df["last_announce_date"] = df["年季"].apply(lambda x: last_announce_date(x, 1))
+    # calculate the data_valid_date, which is the earlier date of 建立日期 and last_announce_date
+    # replace the 0 in 建立日期 with 2999-12-31
+    df["建立日期"] = df["建立日期"].apply(
+        lambda x: datetime.datetime.strptime("2999-12-31", "%Y-%m-%d") if x == 0 else x
+    )
+    df["data_valid_date"] = df[["建立日期", "last_announce_date"]].min(axis=1)
+    # replace the 建立日期 with the data_valid_date
+    df["建立日期"] = df["data_valid_date"]
+
+    if clean == True:
+        df = df[["股票代號", "年季", "建立日期", f"{accounting_item}_4q_sum"]]
     return df
