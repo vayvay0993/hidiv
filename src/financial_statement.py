@@ -108,6 +108,8 @@ def quarterly_to_daily(df_financial_statement, accounting_item, days_shift=1):
         df.reset_index(), id_vars="index", var_name="股票代號", value_name=accounting_item
     )
 
+    df.columns = ["date", "ticker", accounting_item]
+
     return df
 
 
@@ -238,4 +240,66 @@ def flow_item_to_quarter_data(df_financial_statement, accounting_item: str, clea
 
     if clean == True:
         df = df[["股票代號", "年季", "建立日期", f"{accounting_item}_4q_sum"]]
+    return df
+
+
+def flow_item_to_single_quarter_data(
+    df_financial_statement, accounting_item: str, clean=True
+):
+    df = df_financial_statement[["年季", "股票代號", "建立日期", accounting_item]].copy()
+
+    # drop na
+    df.dropna(inplace=True)
+
+    # drop the duplicate
+    df.drop_duplicates(inplace=True)
+
+    df = df.sort_values(by=["股票代號", "年季"]).reset_index(drop=True)
+
+    df[f"{accounting_item}"] = df[f"{accounting_item}"].astype(float)
+
+    df["季底日期"] = df["年季"].apply(lambda x: quarter_end_date(x))
+
+    df["季底日期_last"] = df.groupby("股票代號", as_index=False, group_keys=False)[
+        "季底日期"
+    ].shift(1)
+    df["季底日期_next"] = df.groupby("股票代號", as_index=False, group_keys=False)[
+        "季底日期"
+    ].shift(-1)
+
+    # calculate the date difference between '年季_last' and '年季_next' with '年季_dt'
+    df["季底日期_next_dt"] = df["季底日期_next"] - df["季底日期"]
+    df["季底日期_dt_last"] = df["季底日期"] - df["季底日期_last"]
+
+    df["季底日期_max"] = df[["季底日期_dt_last", "季底日期_next_dt"]].max(axis=1)
+    df["季底日期_max"] = df["季底日期_max"].apply(lambda x: x.days)
+
+    # if 季底日期_max is smaller than 100, then it is a quarterly data, if greater than 200, then it is a yearly data, if between 100 and 200, then it is a half yearly data
+    df["財報類別"] = df["季底日期_max"].apply(lambda x: 1 if x < 100 else 4 if x > 200 else 2)
+    df.set_index("季底日期", inplace=True)
+
+    df_grouped = df.groupby("股票代號")[accounting_item].resample("Q").mean().reset_index()
+    df.reset_index(inplace=True)
+    df = df_grouped.merge(
+        df[["股票代號", "季底日期", "財報類別", "建立日期"]], how="left", on=["股票代號", "季底日期"]
+    ).copy()
+
+    # turn the '季底日期' to '年季'
+    df["年季"] = df["季底日期"].apply(
+        lambda x: x.strftime("%Y") + str(int(x.strftime("%m")) // 3).zfill(2)
+    )
+
+    df[f"{accounting_item}"] = df.groupby("股票代號")[f"{accounting_item}"].ffill()
+    df["財報類別"] = df.groupby("股票代號")["財報類別"].ffill()
+    df["建立日期"] = df.groupby("股票代號")["建立日期"].bfill()
+
+    df["last_announce_date"] = df["年季"].apply(lambda x: last_announce_date(x, 1))
+    df["data_valid_date"] = df[["建立日期", "last_announce_date"]].min(axis=1)
+    df[f"{accounting_item}_single_q"] = df[f"{accounting_item}"] / df["財報類別"]
+
+    df["建立日期"] = df["data_valid_date"]
+
+    if clean == True:
+        df = df[["股票代號", "年季", "建立日期", f"{accounting_item}_single_q"]].copy()
+
     return df
