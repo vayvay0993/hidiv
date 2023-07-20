@@ -3,6 +3,33 @@ from copy import deepcopy
 import json
 
 
+def get_rebalance_date(date_list, start_date, end_date, freq="Q"):
+    next_four_seasons = [start_date]
+    rebalance_date = start_date
+    i = 0
+    while rebalance_date < end_date:
+        if freq == "Q":
+            rebalance_date = start_date + pd.DateOffset(months=3 * (i + 1))
+        elif freq == "M":
+            rebalance_date = start_date + pd.DateOffset(months=1 * (i + 1))
+        elif freq == "Y":
+            rebalance_date = start_date + pd.DateOffset(years=1 * (i + 1))
+
+        # check if rebalance_date is in date_list
+        if rebalance_date in date_list:
+            next_four_seasons.append(rebalance_date)
+        else:
+            # if not, find the next date in date_list
+            for date in date_list:
+                if date > rebalance_date:
+                    # chang np.datetime64 to pd.Timestamp
+                    rebalance_date = pd.Timestamp(date)
+                    next_four_seasons.append(rebalance_date)
+                    break
+        i += 1
+    return next_four_seasons
+
+
 def concatenate_excel_sheets(excel_file_path: str) -> pd.DataFrame:
     # Load the Excel file
     xlsx = pd.read_excel(excel_file_path, sheet_name=None, engine="openpyxl")
