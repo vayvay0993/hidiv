@@ -30,6 +30,54 @@ def get_rebalance_date(date_list, start_date, end_date, freq="Q"):
     return next_four_seasons
 
 
+def get_monthly_end_rebalance_date(date_list, start_date, freq="Q"):
+    # convert date_list to a pandas series for fast lookups
+    date_series = pd.Series(date_list)
+
+    # Map frequencies to their respective offsets
+    freq_to_offset = {"Q": 3, "M": 1, "Y": 12}
+    offset = freq_to_offset.get(freq, 1)  # default to 1 if frequency not recognized
+
+    # Check if start_date or day before is in date_series
+    if (start_date in date_series.values) or (
+        (start_date - pd.DateOffset(days=1)) in date_series.values
+    ):
+        # Find the index of the start_date in date_series, if not found, get the last date before start_date
+        start_date = date_series[date_series <= start_date].iat[-1]
+
+    monthly_end_rebalance_date_lst = [start_date]
+
+    rebalance_date = start_date
+    i = 0
+    while rebalance_date < date_series.iat[-1]:
+        rebalance_date = start_date + pd.DateOffset(months=offset * (i + 1))
+        rebalance_date = rebalance_date + pd.offsets.MonthEnd(0)
+
+        # check if rebalance_date or day before is in date_series
+        if (rebalance_date in date_series.values) or (
+            (rebalance_date - pd.DateOffset(days=1)) in date_series.values
+        ):
+            # Find the index of the rebalance_date in date_series, if not found, get the last date before rebalance_date
+            rebalance_date = date_series[date_series <= rebalance_date].iat[-1]
+            monthly_end_rebalance_date_lst.append(rebalance_date)
+        i += 1
+
+    return monthly_end_rebalance_date_lst
+
+
+def get_data_freezed_date(date_list, rebalance_date_list, days_shift=5):
+    data_freezed_date_lst = []
+
+    for rebalance_date in rebalance_date_list:
+        # find the index for rebalance_date in date_list
+        index = list(date_list).index(rebalance_date)
+        # find the data_freezed_date by shifting the index by days_shift
+        data_freezed_date = date_list[index - days_shift]
+        data_freezed_date_lst.append(data_freezed_date)
+
+    return data_freezed_date_lst
+
+
 def concatenate_excel_sheets(excel_file_path: str) -> pd.DataFrame:
     # Load the Excel file
     xlsx = pd.read_excel(excel_file_path, sheet_name=None, engine="openpyxl")

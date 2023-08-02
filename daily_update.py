@@ -70,7 +70,6 @@ table_names = [
     "季IFRS財報(總表)",
     "月董監股權與設質統計表",
 ]
-vdalue
 
 
 start_time = time.time()
