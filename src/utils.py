@@ -1,6 +1,149 @@
 import pandas as pd
 from copy import deepcopy
 import json
+import numpy as np
+from PIL import Image
+
+
+# load the f'./figs/table_{params_str}_1.png' and crop the left 40 pixels
+def crop_index(img_path):
+    img = Image.open(img_path)
+    img = img.crop((20, 0, img.size[0], img.size[1]))
+    img.save(img_path)
+
+
+# merge the four images to one image and save it to f'./figs/table_{params_str}.png'
+def merge_images(img_paths, output_path, y_gap=0):
+    images = [Image.open(x) for x in img_paths]
+    widths, heights = zip(*(i.size for i in images))
+
+    # The total width is the max width of all images since they are aligned to the left.
+    total_width = max(widths)
+    # The total height is the sum of all image heights plus the gaps between them.
+    total_height = sum(heights) + y_gap * (len(images) - 1)
+
+    new_im = Image.new("RGB", (total_width, total_height), "white")
+    y_offset = 0
+
+    for im in images:
+        new_im.paste(im, (0, y_offset))  # Align to the left and use y_offset
+        y_offset += (
+            im.size[1] + y_gap
+        )  # Move y_offset down by the height of the image and the gap
+
+    new_im.save(output_path)
+
+
+def weight_by_yields(df_input, month, weight_col, replace_bottom="min"):
+    df = df_input.copy()
+    df_ori = df_input.copy()
+    df["month"] = df["date"].dt.month
+    df = df[df["month"] == month].copy()
+    df.reset_index(drop=True, inplace=True)
+
+    # Define a custom function
+    def replace_zero_with_min(s):
+        min_val = s[s > 0].min()
+        return s.replace(0, min_val)
+
+    def replace_with_q20(s):
+        q20_val = s.quantile(0.2)
+        return s.apply(lambda x: q20_val if x < q20_val else x)
+
+    if replace_bottom == "min":
+        # Apply the custom function after grouping by 'date'
+        df["last_dividend_yield_adj"] = df.groupby("date")[
+            "last_dividend_yield"
+        ].transform(replace_zero_with_min)
+
+    if replace_bottom == "q20":
+        # Apply the custom function after grouping by 'date'
+        df["last_dividend_yield_adj"] = df.groupby("date")[
+            "last_dividend_yield"
+        ].transform(replace_with_q20)
+
+    # Compute the total yield for each date
+    total_yield = df.groupby("date")["last_dividend_yield_adj"].transform("sum")
+    # Compute the weight of each ticker by dividing its yield by the total yield for its date
+    df["weight_by_yields"] = df["last_dividend_yield_adj"] / total_yield
+
+    df_mod = pd.merge(
+        df_ori,
+        df[["date", "ticker", "weight_by_yields"]],
+        how="left",
+        on=["date", "ticker"],
+    ).copy()
+    df_mod["weight_by_yields"] = np.where(
+        df_mod["weight_by_yields"] > 0, df_mod["weight_by_yields"], df_mod[weight_col]
+    )
+
+    return df_mod
+
+
+def adjust_weights(
+    df,
+    adjust_type=["equal", "equal"],
+    ratio=0.5,
+    weight_ratio=1,
+    rank_col="rank",
+    weight_col="weight",
+):
+    df = df.copy()  # To prevent inplace changes to the original dataframe.
+    # Validate input params
+    assert all(
+        t in ["equal", "triangle"] for t in adjust_type
+    ), "Invalid adjust_type. Each type should be 'equal' or 'triangle'."
+    assert 0 <= ratio <= 0.5, "Invalid ratio. Should be between 0 and 0.5."
+    assert 0 <= weight_ratio <= 1, "Invalid weight_ratio. Should be between 0 and 1."
+
+    df["adjusted_weight"] = df[weight_col]
+
+    # Process each group by date
+    for date, group in df.groupby("date"):
+        total = group.shape[0]
+        num_adjust = int(total * ratio)
+        if num_adjust == 0:  # Skip if no weights need adjustment.
+            continue
+
+        # Identify the bottom ranks
+        bottom_ranks = group[rank_col].nlargest(num_adjust).index
+
+        # Compute the amount of weight to move from bottom ranks to top ranks.
+        available_weight_to_move = group.loc[bottom_ranks, weight_col].sum()
+        weight_to_move = min(
+            available_weight_to_move * weight_ratio, available_weight_to_move
+        )
+
+        # Subtract this total weight from the bottom ranks
+        subtract_per_rank = weight_to_move / len(bottom_ranks)
+        # df.loc[bottom_ranks, 'adjusted_weight'] -= subtract_per_rank
+
+        # Determine additional weight for top ranks
+        top_ranks = group[rank_col].nsmallest(num_adjust).index
+        if adjust_type[0] == "equal":
+            # Distribute weights equally among top rankers.
+            additional_weight = weight_to_move / len(top_ranks)
+            df.loc[top_ranks, "adjusted_weight"] += additional_weight
+        elif adjust_type[0] == "triangle":
+            # Distribute weights according to the triangle pattern.
+            weights = np.arange(1, num_adjust + 1)[::-1]  # reversed
+            weights = (
+                weights / weights.sum() * weight_to_move
+            )  # normalize to total_weight_to_move
+            df.loc[top_ranks, "adjusted_weight"] += weights
+
+        if adjust_type[1] == "equal":
+            # Distribute weights equally among bottom rankers.
+            df.loc[bottom_ranks, "adjusted_weight"] -= subtract_per_rank
+        elif adjust_type[1] == "triangle":
+            # Distribute weights according to the reversed triangle pattern.
+            weights = np.arange(1, num_adjust + 1)  # non-reversed
+            weights = (
+                weights / weights.sum() * weight_to_move
+            )  # normalize to total_weight_to_move
+            df.loc[bottom_ranks, "adjusted_weight"] -= np.flip(weights)
+
+    return df
 
 
 def get_rebalance_date(date_list, start_date, end_date, freq="Q"):
