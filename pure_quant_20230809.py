@@ -44,6 +44,7 @@ import matplotlib.ticker as mtick
 import itertools
 import json
 import dataframe_image as dfi
+
 # import Image
 from PIL import Image
 
@@ -74,6 +75,7 @@ def create_table(df, cell_heights):
     ax.axis("off")
 
     return fig, ax
+
 
 # %%
 # select model
@@ -2265,15 +2267,6 @@ df_yearly_turnover["turnover"].describe().reset_index()
 
 
 # %%
-df_quarterly_turnover
-
-# %%
-
-
-# %%
-
-
-# %%
 df_weight_detail = (
     df_portfolio_value_detail_all.sort_values(["date", "ticker"])
     .reset_index(drop=True)
@@ -2316,9 +2309,3 @@ plt.grid()
 
 # %%
 df_weight_detail[df_weight_detail["max_aum_assumption"] < 40]
-
-# %%
-series_sr
-
-# %%
-series_sr

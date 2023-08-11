@@ -52,7 +52,7 @@ data_sources = [
 #         future.result()
 
 # 以下資料為需要更新全部資料的表格
-# get_CMoney_data(table_name="日收盤還原表排行", start_date="20000101", freq="Y")
+get_CMoney_data(table_name="日收盤還原表排行", start_date="20000101", freq="Y")
 # get_CMoney_data(table_name="日收盤還原表排行(還原分紅)", start_date="20000101", freq="Y")
 
 end_time = time.time()
