@@ -146,6 +146,72 @@ def adjust_weights(
     return df
 
 
+def adjust_weights_double_sorting(
+    df,
+    adjust_type=["equal", "equal"],
+    ratio=0.5,
+    weight_ratio=1,
+    rank_col="rank",
+    weight_col="weight",
+):
+    df = df.copy()  # To prevent inplace changes to the original dataframe.
+    # Validate input params
+    assert all(
+        t in ["equal", "triangle"] for t in adjust_type
+    ), "Invalid adjust_type. Each type should be 'equal' or 'triangle'."
+    assert 0 <= ratio <= 0.5, "Invalid ratio. Should be between 0 and 0.5."
+    assert 0 <= weight_ratio <= 1, "Invalid weight_ratio. Should be between 0 and 1."
+
+    df["adjusted_weight"] = df[weight_col]
+
+    # Process each group by date
+    for date, group in df.groupby("date"):
+        total = group.shape[0]
+        num_adjust = int(total * ratio)
+        if num_adjust == 0:  # Skip if no weights need adjustment.
+            continue
+
+        # Identify the bottom ranks
+        bottom_ranks = group[rank_col].nlargest(num_adjust).index
+
+        # Compute the amount of weight to move from bottom ranks to top ranks.
+        available_weight_to_move = group.loc[bottom_ranks, weight_col].sum()
+        weight_to_move = min(
+            available_weight_to_move * weight_ratio, available_weight_to_move
+        )
+
+        # Subtract this total weight from the bottom ranks
+        subtract_per_rank = weight_to_move / len(bottom_ranks)
+        # df.loc[bottom_ranks, 'adjusted_weight'] -= subtract_per_rank
+
+        # Determine additional weight for top ranks
+        top_ranks = group[rank_col].nsmallest(num_adjust).index
+        if adjust_type[0] == "equal":
+            # Distribute weights equally among top rankers.
+            additional_weight = weight_to_move / len(top_ranks)
+            df.loc[top_ranks, "adjusted_weight"] += additional_weight
+        elif adjust_type[0] == "triangle":
+            # Distribute weights according to the triangle pattern.
+            weights = np.arange(1, num_adjust + 1)[::-1]  # reversed
+            weights = (
+                weights / weights.sum() * weight_to_move
+            )  # normalize to total_weight_to_move
+            df.loc[top_ranks, "adjusted_weight"] += weights
+
+        if adjust_type[1] == "equal":
+            # Distribute weights equally among bottom rankers.
+            df.loc[bottom_ranks, "adjusted_weight"] -= subtract_per_rank
+        elif adjust_type[1] == "triangle":
+            # Distribute weights according to the reversed triangle pattern.
+            weights = np.arange(1, num_adjust + 1)  # non-reversed
+            weights = (
+                weights / weights.sum() * weight_to_move
+            )  # normalize to total_weight_to_move
+            df.loc[bottom_ranks, "adjusted_weight"] -= np.flip(weights)
+
+    return df
+
+
 def get_rebalance_date(date_list, start_date, end_date, freq="Q"):
     next_four_seasons = [start_date]
     rebalance_date = start_date
